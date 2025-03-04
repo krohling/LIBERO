@@ -128,6 +128,48 @@ class ObjectState(BaseObjectState):
             if not (self.env.get_object(self.object_name).turn_off(qpos)):
                 return False
         return True
+    
+    def is_knocked_over(self, threshold=0.01):
+        """
+        Determines if the object is knocked over by checking if its tallest dimension is more horizontal than vertical.
+
+        :param threshold: The threshold for considering an object knocked over (default is 0.7).
+                        This represents how close the tallest axis' Z-component should be to 0.
+        :return: True if knocked over, False otherwise.
+        """
+
+        # Get all geometries' sizes
+        geom_sizes = self.env.get_object(self.object_name).get_model().geom_size
+
+        # Find the maximum dimension across all geometries
+        max_size = np.max(geom_sizes, axis=0)  # Get the largest dimension per axis
+        tallest_dim_index = np.argmax(max_size)  # Index of the tallest axis
+
+        # Get object orientation in world frame
+        object_quat = self.env.sim.data.body_xquat[self.env.obj_body_id[self.object_name]]
+
+        # Convert quaternion to rotation matrix
+        rotation_matrix = transform_utils.quat2mat(object_quat)
+
+        # Extract the world-frame direction of the tallest axis
+        tallest_axis_world = rotation_matrix[:, tallest_dim_index]
+
+        # The Z-component tells us how vertical it is
+        vertical_alignment = np.abs(tallest_axis_world[2])
+
+        # print(f"vertical_alignment: {vertical_alignment}")
+
+        # If the vertical alignment is below the threshold, consider it knocked over
+        # return vertical_alignment < threshold
+        result = vertical_alignment > threshold
+
+        # if result:
+        #     print("*"*50)
+        #     print("Knocked Over!")
+        #     print(f"vertical_alignment: {vertical_alignment}")
+        #     print("*"*50)
+
+        return result
 
     def update_state(self):
         if self.has_turnon_affordance:

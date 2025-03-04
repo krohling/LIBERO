@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 class DeterministicHead(nn.Module):
-    def __init__(self, input_size, output_size, hidden_size=1024, num_layers=2):
+    def __init__(self, input_size, output_size, hidden_size=1024, num_layers=2, action_squash=False):
 
         super().__init__()
         sizes = [input_size] + [hidden_size] * num_layers + [output_size]
@@ -15,7 +15,7 @@ class DeterministicHead(nn.Module):
             layers += [nn.Linear(sizes[i], sizes[i + 1]), nn.ReLU()]
         layers += [nn.Linear(sizes[-2], sizes[-1])]
 
-        if self.action_squash:
+        if action_squash:
             layers += [nn.Tanh()]
 
         self.net = nn.Sequential(*layers)

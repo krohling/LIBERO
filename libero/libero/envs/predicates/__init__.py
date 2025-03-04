@@ -15,6 +15,7 @@ VALIDATE_PREDICATE_FN_DICT = {
     "close": Close(),
     "turnon": TurnOn(),
     "turnoff": TurnOff(),
+    "knockedover": KnockedOver(),
 }
 
 
