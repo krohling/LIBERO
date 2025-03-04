@@ -37,12 +37,15 @@ from libero.lifelong.utils import (
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
 def main(hydra_cfg):
     # preprocessing
+    print(f"hydra_cfg: {hydra_cfg}")
     yaml_config = OmegaConf.to_yaml(hydra_cfg)
     cfg = EasyDict(yaml.safe_load(yaml_config))
 
     # print configs to terminal
     pp = pprint.PrettyPrinter(indent=2)
+    print("*"*50)
     pp.pprint(cfg)
+    print("*"*50)
 
     pp.pprint("Available algorithms:")
     pp.pprint(get_algo_list())
@@ -196,6 +199,13 @@ def main(hydra_cfg):
             result_summary["S_conf_mat"][-1] = S
 
             if cfg.use_wandb:
+                wandb.log({
+                    "mt_success_confusion_matrix": result_summary["S_conf_mat"],
+                    "mt_loss_confusion_matrix": result_summary["L_conf_mat"],
+                    "mt_fwd_transfer_success": result_summary["S_fwd"],
+                    "mt_fwd_transfer_loss": result_summary["L_fwd"],
+                })
+
                 wandb.run.summary["success_confusion_matrix"] = result_summary[
                     "S_conf_mat"
                 ]
@@ -204,7 +214,12 @@ def main(hydra_cfg):
                 ]
                 wandb.run.summary["fwd_transfer_success"] = result_summary["S_fwd"]
                 wandb.run.summary["fwd_transfer_loss"] = result_summary["L_fwd"]
-                wandb.run.summary.update()
+                wandb.run.summary.update({
+                    "success_confusion_matrix": result_summary["S_conf_mat"],
+                    "loss_confusion_matrix": result_summary["L_conf_mat"],
+                    "fwd_transfer_success": result_summary["S_fwd"],
+                    "fwd_transfer_loss": result_summary["L_fwd"],
+                })
 
             print(("[All task loss ] " + " %4.2f |" * n_tasks) % tuple(L))
             print(("[All task succ.] " + " %4.2f |" * n_tasks) % tuple(S))
@@ -247,7 +262,13 @@ def main(hydra_cfg):
                     ]
                     wandb.run.summary["fwd_transfer_success"] = result_summary["S_fwd"]
                     wandb.run.summary["fwd_transfer_loss"] = result_summary["L_fwd"]
-                    wandb.run.summary.update()
+                    
+                    wandb.run.summary.update({
+                        f"task_{i}_success_confusion_matrix": result_summary["S_conf_mat"],
+                        f"task_{i}_loss_confusion_matrix": result_summary["L_conf_mat"],
+                        f"task_{i}_fwd_transfer_success": result_summary["S_fwd"],
+                        f"task_{i}_fwd_transfer_loss": result_summary["L_fwd"],
+                    })
 
                 print(
                     f"[info] train time (min) {(t1-t0)/60:.1f} "

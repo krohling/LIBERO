@@ -1,14 +1,11 @@
-deploy_container.sh
-
 *~
 .hydra
 *pyc
-datasets
 results
 outputs/*
 /MUJOCO_LOG.TXT
 wandb
-experiments/
+# experiments/
 experiments_saved/
 clip/
 gpt/
@@ -18,3 +15,8 @@ logs/
 *.mp4
 libero.egg-info/
 .vscode/
+
+notebooks/
+images/
+Dockerfile
+deploy_container.sh

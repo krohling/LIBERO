@@ -150,11 +150,25 @@ def main():
         else:
             model_path = os.path.join(run_folder, f"task{args.load_task}_model.pth")
             sd, cfg, previous_mask = torch_load_model(
-                model_path, map_location=args.device_id
+                model_path, map_location=torch.device('cpu')
             )
-    except:
+    except Exception as e:
+        print(e)
         print(f"[error] cannot find the checkpoint at {str(model_path)}")
         sys.exit(0)
+
+    cfg['eval']  = {
+        "load_path": "",
+        "eval": True,
+        "batch_size": 1,
+        "num_workers": 0,
+        "n_eval": 10,
+        "eval_every": 5,
+        "max_steps": 600,
+        "use_mp": True,
+        "num_procs": 2,
+        "save_sim_states": False
+    }
 
     cfg.folder = get_libero_path("datasets")
     cfg.bddl_folder = get_libero_path("bddl_files")
@@ -178,12 +192,22 @@ def main():
 
     algo.policy.load_state_dict(sd)
 
+    print(cfg)
+
+    # wandb.init(
+    #         project="libero",
+    #         entity="kevinai",
+    #         config=OmegaConf.to_container(cfg, resolve=True),
+    #         name=f"{args.benchmark}_{args.algo}_{args.policy}_{args.seed}_load{args.load_task}_on{args.task_id}",
+    #     )
+
     if not hasattr(cfg.data, "task_order_index"):
         cfg.data.task_order_index = 0
 
     # get the benchmark the task belongs to
     benchmark = get_benchmark(cfg.benchmark_name)(cfg.data.task_order_index)
     descriptions = [benchmark.get_task(i).language for i in range(10)]
+    print(descriptions)
     task_embs = get_task_embs(cfg, descriptions)
     benchmark.set_task_embs(task_embs)
 
@@ -240,7 +264,7 @@ def main():
             "camera_widths": cfg.data.img_w,
         }
 
-        env_num = 20
+        env_num = 10
         env = SubprocVectorEnv(
             [lambda: OffScreenRenderEnv(**env_args) for _ in range(env_num)]
         )
@@ -292,13 +316,30 @@ def main():
             "success_rate": success_rate,
         }
 
+        print(eval_stats)
+
+        # save eval stats as json
+        json_path = os.path.join(
+            args.save_dir,
+            f"{args.benchmark}_{args.algo}_{args.policy}_{args.seed}_load{args.load_task}_on{args.task_id}.json",
+        )
+        json.dump(eval_stats, open(json_path, "w"), cls=NpEncoder)
+
         os.system(f"mkdir -p {args.save_dir}")
         torch.save(eval_stats, save_folder)
+    
     print(
         f"[info] finish for ckpt at {run_folder} in {t.get_elapsed_time()} sec for rollouts"
     )
     print(f"Results are saved at {save_folder}")
     print(test_loss, success_rate)
+
+    # zip the videos
+    # if args.save_videos:
+    #     os.system(f"zip -r {video_folder}.zip {video_folder}")
+    #     # upload to wandb
+    #     wandb.save(f"{video_folder}.zip")
+        
 
 
 if __name__ == "__main__":

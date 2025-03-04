@@ -10,8 +10,8 @@ defaults:
   - test: null
 
 seed: 10000
-use_wandb: false
-wandb_project: "lifelong learning"
+use_wandb: true
+wandb_project: "libero"
 folder: null # use default path
 bddl_folder: null # use default path
 init_states_folder: null # use default path

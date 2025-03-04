@@ -1,4 +1,5 @@
 import os
+import wandb
 
 import numpy as np
 import torch
@@ -35,7 +36,7 @@ class Multitask(Sequential):
             batch_size=self.cfg.train.batch_size,
             num_workers=self.cfg.train.num_workers,
             sampler=RandomSampler(concat_dataset),
-            persistent_workers=True,
+            persistent_workers=False,
         )
 
         prev_success_rate = -1.0
@@ -70,6 +71,12 @@ class Multitask(Sequential):
             print(
                 f"[info] Epoch: {epoch:3d} | train loss: {training_loss:5.2f} | time: {(t1-t0)/60:4.2f}"
             )
+
+            if self.cfg.use_wandb:
+                wandb.log({
+                    "epoch": epoch,
+                    "mt_train_loss": training_loss,
+                })
 
             if epoch % self.cfg.eval.eval_every == 0:  # evaluate BC loss
                 t0 = time.time()
@@ -112,6 +119,18 @@ class Multitask(Sequential):
                         + f"| succ. AoC {tmp_successes.sum()/cumulated_counter:4.2f} | time: {(t1-t0)/60:4.2f}",
                         flush=True,
                     )
+
+                    if self.cfg.use_wandb:
+                        wandb.log({
+                            "epoch": epoch,
+                            "mt_success_rate": success_rate,
+                            "mt_success_aoc": tmp_successes.sum()/cumulated_counter,
+                        })
+                        temp_checkpoint_name = os.path.join(
+                            self.experiment_dir, f"multitask_model_epoch_{epoch}.pth"
+                        )
+                        torch_save_model(self.policy, temp_checkpoint_name, cfg=self.cfg)
+                        wandb.save(temp_checkpoint_name)
 
             if self.scheduler is not None and epoch > 0:
                 self.scheduler.step()

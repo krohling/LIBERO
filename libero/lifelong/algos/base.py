@@ -1,5 +1,6 @@
 import os
 import time
+import wandb
 
 import numpy as np
 import robomimic.utils.tensor_utils as TensorUtils
@@ -137,12 +138,24 @@ class Sequential(nn.Module, metaclass=AlgoMeta):
             self.experiment_dir, f"task{task_id}_model.pth"
         )
 
+        # train_dataloader = DataLoader(
+        #     dataset,
+        #     batch_size=128,
+        #     num_workers=0,
+        #     sampler=RandomSampler(dataset),
+        #     persistent_workers=False,
+        # )
+
+        print("*"*50)
+        print(self.cfg)
+        print("*"*50)
+
         train_dataloader = DataLoader(
             dataset,
             batch_size=self.cfg.train.batch_size,
             num_workers=self.cfg.train.num_workers,
             sampler=RandomSampler(dataset),
-            persistent_workers=True,
+            persistent_workers=False,
         )
 
         prev_success_rate = -1.0
@@ -160,6 +173,7 @@ class Sequential(nn.Module, metaclass=AlgoMeta):
 
         # start training
         for epoch in range(0, self.cfg.train.n_epochs + 1):
+            print(f"epoch: {epoch}")
 
             t0 = time.time()
 
@@ -178,9 +192,16 @@ class Sequential(nn.Module, metaclass=AlgoMeta):
                 training_loss /= len(train_dataloader)
             t1 = time.time()
 
+            
             print(
                 f"[info] Epoch: {epoch:3d} | train loss: {training_loss:5.2f} | time: {(t1-t0)/60:4.2f}"
             )
+
+            if self.cfg.use_wandb:
+                wandb.log({
+                    "epoch": epoch,
+                    f"task_{task_id}_train_loss": training_loss,
+                })
 
             if epoch % self.cfg.eval.eval_every == 0:  # evaluate BC loss
                 # every eval_every epoch, we evaluate the agent on the current task,
@@ -224,6 +245,18 @@ class Sequential(nn.Module, metaclass=AlgoMeta):
                     + f"| succ. AoC {tmp_successes.sum()/cumulated_counter:4.2f} | time: {(t1-t0)/60:4.2f}",
                     flush=True,
                 )
+                
+                if self.cfg.use_wandb:
+                    wandb.log({
+                        "epoch": epoch,
+                        f"task_{task_id}_success_rate": success_rate,
+                        f"task_{task_id}_success_aoc": tmp_successes.sum()/cumulated_counter,
+                    })
+                    temp_checkpoint_name = os.path.join(
+                        self.experiment_dir, f"task{task_id}_model_epoch_{epoch}.pth"
+                    )
+                    torch_save_model(self.policy, temp_checkpoint_name, cfg=self.cfg)
+                    wandb.save(temp_checkpoint_name)
 
             if self.scheduler is not None and epoch > 0:
                 self.scheduler.step()
