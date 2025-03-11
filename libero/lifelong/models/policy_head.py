@@ -26,6 +26,37 @@ class DeterministicHead(nn.Module):
         y = self.net(x)
         return y
 
+class DeterministicSampleHead(nn.Module):
+    def __init__(self, input_size, output_size, hidden_size=1024, num_layers=2, action_squash=False):
+
+        super().__init__()
+        sizes = [input_size] + [hidden_size] * num_layers + [output_size]
+        layers = []
+        for i in range(num_layers):
+            layers += [nn.Linear(sizes[i], sizes[i + 1]), nn.ReLU()]
+        layers += [nn.Linear(sizes[-2], sizes[-1])]
+
+        if action_squash:
+            layers += [nn.Tanh()]
+
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        y = self.net(x)
+        return D.Normal(y, 0.00001)
+    
+    # Use MSE loss
+    def loss_fn(self, y_dist, target, reduction="mean"):
+        loss = (y_dist.mean - target).pow(2)
+        if reduction == "mean":
+            return loss.mean()
+        elif reduction == "none":
+            return loss
+        elif reduction == "sum":
+            return loss.sum()
+        else:
+            raise NotImplementedError
+
 
 class StochasticHead(nn.Module):
     def __init__(self, input_size, output_size, hidden_size=1024, num_layers=2, action_squash=False):
