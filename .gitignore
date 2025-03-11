@@ -1,4 +1,6 @@
+.DS_Store
 deploy_container.sh
+ppo/runs/
 
 *~
 .hydra

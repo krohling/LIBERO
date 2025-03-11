@@ -199,6 +199,40 @@ def make_libero_envs(
 
 
 
+class LiberoAgent(nn.Module):
+    def __init__(self, envs):
+        super().__init__()
+        self.task_emb = torch.randn(768)
+        self.critic = make_policy('./critic_config.json')
+        self.actor = make_policy('./actor_config.json')
+        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+
+    def get_value(self, obs):
+        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
+        critic_input = self.critic.preprocess_input(obs, train_mode=False)
+        q_value = self.critic(critic_input).squeeze()
+
+        return q_value
+
+    def get_action_and_value(self, obs, action=None):
+        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
+        actor_input = self.actor.preprocess_input(obs, train_mode=False)
+
+        probs = self.actor(actor_input)
+        if action is None:
+            action = probs.sample()
+            action = action.squeeze()
+        
+        action_log_prob = probs.log_prob(action).sum(1)
+        entropy = probs.entropy().sum(1)
+
+        critic_input = self.critic.preprocess_input(obs, train_mode=False)
+        q_value = self.critic(critic_input).squeeze()
+        
+        return action, action_log_prob, entropy, q_value
+
+
+
 # class LiberoAgent(nn.Module):
 #     def __init__(self, envs):
 #         super().__init__()
@@ -212,76 +246,37 @@ def make_libero_envs(
 #         critic_input = self.critic.preprocess_input(obs, train_mode=False)
 #         q_value = self.critic(critic_input).squeeze()
 
-#         print(f"q_value: {q_value}")
-
 #         return q_value
 
 #     def get_action_and_value(self, obs, action=None):
 #         obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-#         actor_input = self.actor.preprocess_input(obs, train_mode=False)
 
-#         probs = self.actor(actor_input)
+#         actor_input = self.actor.preprocess_input(obs, train_mode=False)
+#         action_mean = self.actor(actor_input).squeeze()
+#         # print(f"action_mean.shape: {action_mean.shape}")
+
+#         if action_mean.ndim == 1:
+#             action_mean = action_mean.unsqueeze(0)
+#         action_logstd = self.actor_logstd.expand_as(action_mean)
+#         # print(f"action_logstd.shape: {action_logstd.shape}")
+
+#         action_std = torch.exp(action_logstd)
+#         # print(f"action_std.shape: {action_std.shape}")
+
+#         probs = Normal(action_mean, action_std)
 #         if action is None:
-#             action = probs.sample()
-#             action = action.squeeze()
+#             action = probs.sample().squeeze()
         
 #         action_log_prob = probs.log_prob(action).sum(1)
-#         entropy = probs.entropy().sum(1)
+#         # print(f"action_log_prob.shape: {action_log_prob.shape}")
 
+#         entropy = probs.entropy().sum(1)
+#         # print(f"entropy.shape: {entropy.shape}")
+        
 #         critic_input = self.critic.preprocess_input(obs, train_mode=False)
 #         q_value = self.critic(critic_input).squeeze()
-#         print(f"q_value: {q_value}")
         
 #         return action, action_log_prob, entropy, q_value
-
-
-
-class LiberoAgent(nn.Module):
-    def __init__(self, envs):
-        super().__init__()
-        self.task_emb = torch.randn(768)
-        self.critic = make_policy('./critic_config.json')
-        self.actor = make_policy('./actor_config_prev.json')
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
-
-    def get_value(self, obs):
-        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-        critic_input = self.critic.preprocess_input(obs, train_mode=False)
-        q_value = self.critic(critic_input).squeeze()
-
-        return q_value
-
-    def get_action_and_value(self, obs, action=None):
-        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-
-        actor_input = self.actor.preprocess_input(obs, train_mode=False)
-        action_mean = self.actor(actor_input).squeeze()
-        # print(f"action_mean.shape: {action_mean.shape}")
-
-        print(f"action_mean.shape: {action_mean.shape}")
-        print(f"action_mean: {action_mean}")
-        if action_mean.ndim == 1:
-            action_mean = action_mean.unsqueeze(0)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        # print(f"action_logstd.shape: {action_logstd.shape}")
-
-        action_std = torch.exp(action_logstd)
-        # print(f"action_std.shape: {action_std.shape}")
-
-        probs = Normal(action_mean, action_std)
-        if action is None:
-            action = probs.sample().squeeze()
-        
-        action_log_prob = probs.log_prob(action).sum(1)
-        # print(f"action_log_prob.shape: {action_log_prob.shape}")
-
-        entropy = probs.entropy().sum(1)
-        # print(f"entropy.shape: {entropy.shape}")
-        
-        critic_input = self.critic.preprocess_input(obs, train_mode=False)
-        q_value = self.critic(critic_input).squeeze()
-        
-        return action, action_log_prob, entropy, q_value
 
 
 if __name__ == "__main__":
@@ -445,9 +440,6 @@ if __name__ == "__main__":
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
 
-        print("b_logprobs")
-        print(b_logprobs)
-
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
         clipfracs = []
@@ -457,20 +449,10 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                # print("**************")
-                # print(f"mb_inds: {mb_inds}")
-                # print(b_obs.__class__)
-                # print(len(b_obs))
-
-                print("***Querying policy")
                 _, newlogprob, entropy, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 # _, newlogprob, entropy, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
-                print(f"b_logprobs[mb_inds]: {b_logprobs[mb_inds]}")
-                print(f"newlogprob: {newlogprob}")
                 logratio = newlogprob - b_logprobs[mb_inds]
-                print(f"logratio: {logratio}")
                 ratio = logratio.exp()
-                print(f"ratio: {ratio}")
 
                 with torch.no_grad():
                     # calculate approx_kl http://joschu.net/blog/kl-approx.html
@@ -478,16 +460,11 @@ if __name__ == "__main__":
                     approx_kl = ((ratio - 1) - logratio).mean()
                     clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
 
-                print(f"b_advantages[mb_inds]: {b_advantages[mb_inds]}")
                 mb_advantages = b_advantages[mb_inds]
                 if args.norm_adv:
-                    print(f"mb_advantages: {mb_advantages}")
-                    print(f"mb_advantages.mean(): {mb_advantages.mean()}")
-                    print(f"mb_advantages.std(): {mb_advantages.std()}")
                     mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
                 # Policy loss
-                print(f"mb_advantages: {mb_advantages}")
                 pg_loss1 = -mb_advantages * ratio
                 pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
@@ -507,11 +484,6 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-
-                print(f"pg_loss: {pg_loss}")
-                print(f"v_loss: {v_loss}")
-                print(f"entropy: {entropy}")
-
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
@@ -520,7 +492,6 @@ if __name__ == "__main__":
                 # loss = pg_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
-                print(f"loss: {loss}")
                 loss.backward()
                 nn.utils.clip_grad_norm_(libero_agent.parameters(), args.max_grad_norm)
                 optimizer.step()

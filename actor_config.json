@@ -114,7 +114,7 @@
           }
        },
        "policy_head":{
-          "network":"DeterministicHead",
+          "network":"StochasticHead",
           "network_kwargs":{
              "input_size":32,
              "output_size":7,

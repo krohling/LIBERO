@@ -44,27 +44,15 @@ class StochasticHead(nn.Module):
         self.action_logstd = nn.Parameter(torch.zeros(1, np.prod(output_size)))
 
     def forward(self, x):
-        print("*****forward******")
-        print(f"x shape: {x.shape}")
-        print(x)
         action_mean = self.net(x)
-        print(f"action_mean shape: {action_mean.shape}")
-        print(action_mean)
 
         if action_mean.ndim == 3 and action_mean.shape[1] == 1:
-            print("Squeezing time dimension")
             action_mean = action_mean.squeeze(1)
 
         action_logstd = self.action_logstd.expand_as(action_mean)
         # action_logstd = self.action_logstd.repeat(x.shape[0], 1) # uncomment to match batch size
 
         action_std = torch.exp(action_logstd)
-        print("**********")
-        print(action_mean.shape)
-        print(action_mean)
-        print(action_std.shape)
-        print(action_std)
-        print("**********")
         probs = D.Normal(action_mean, action_std)
 
         return probs
