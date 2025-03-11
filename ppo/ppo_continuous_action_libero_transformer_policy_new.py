@@ -198,68 +198,13 @@ def make_libero_envs(
     return env
 
 
-def compute_mixture_entropy(gmm):
-    """
-    Computes entropy of a MixtureSameFamily distribution manually.
-
-    Args:
-        gmm (torch.distributions.MixtureSameFamily): The Gaussian Mixture Model distribution.
-
-    Returns:
-        torch.Tensor: Entropy of the mixture distribution, shape (batch_size, 1).
-    """
-    mix = gmm.mixture_distribution  # Categorical distribution
-    compo = gmm.component_distribution  # Independent Normal distribution
-
-    # Entropy of categorical distribution H(C)
-    H_C = mix.entropy()  # Shape: (batch_size,)
-    if H_C.dim() > 1:
-        H_C = H_C.squeeze(-1)  # Ensure shape (batch_size,)
-    # print(f"H_C shape: {H_C.shape}")  # Expected: (batch_size,)
-
-    # Entropy of the component distributions H(X | C), BEFORE Independent() is applied
-    H_X_given_C = gmm.component_distribution.base_dist.entropy()  # (batch_size, 1, num_modes, output_size)
-    # print(f"Before squeeze, H_X_given_C shape: {H_X_given_C.shape}")  # Debugging output
-
-    # Remove the extra dim at index 1
-    H_X_given_C = H_X_given_C.squeeze(1)  # Now should be (batch_size, num_modes, output_size)
-    # print(f"After squeeze, H_X_given_C shape: {H_X_given_C.shape}")  # Expected: (batch_size, num_modes, output_size)
-
-    # Convert logits to probabilities
-    prob_C = mix.probs  # Expected shape: (batch_size, num_modes)
-    if prob_C.dim() < 3:
-        prob_C = prob_C.unsqueeze(1)  # Ensure proper broadcasting (batch_size, 1, num_modes)
-    
-    # print(f"prob_C shape: {prob_C.shape}")  # Expected: (batch_size, 1, num_modes)
-    prob_C = prob_C.unsqueeze(-1)
-    # print(f"prob_C shape: {prob_C.shape}")  # Expected: (batch_size, 1, num_modes)
-
-    # Expected entropy over mixture components: sum(p(c) * H(X|C))
-    # print((prob_C * H_X_given_C).shape)
-    H_X = (prob_C * H_X_given_C).sum(dim=-2).sum(-2)  # Sum over mixture components
-    # print(f"H_X shape after summing over components: {H_X.shape}")  # Should be (batch_size, output_size)
-
-    # Sum over action dimensions to get final entropy per batch item
-    H_X = H_X.sum(dim=-1, keepdim=True)  # Sum over action dimensions (output_size -> 1)
-    # print(f"H_X shape after summing over action dims: {H_X.shape}")  # Expected: (batch_size, 1)
-
-    # Total entropy H(X) = H(C) + E_C[H(X|C)]
-    result = H_C.unsqueeze(-1) + H_X  # Ensure shape is (batch_size, 1)
-    # print(f"result.shape: {result.shape}")  # Expected: (batch_size, 1)
-
-    result = result.squeeze()
-    # print(f"result.shape: {result.shape}")  # Expected: (batch_size, 1)
-
-    return result
-
-
 
 class LiberoAgent(nn.Module):
     def __init__(self, envs):
         super().__init__()
         self.task_emb = torch.randn(768)
         self.critic = make_policy('./critic_config.json')
-        self.actor = make_policy('./actor_config_prev.json')
+        self.actor = make_policy('./actor_config.json')
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
 
     def get_value(self, obs):
@@ -271,27 +216,16 @@ class LiberoAgent(nn.Module):
 
     def get_action_and_value(self, obs, action=None):
         obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-
         actor_input = self.actor.preprocess_input(obs, train_mode=False)
-        action_mean = self.actor(actor_input).squeeze()
-        # print(f"action_mean.shape: {action_mean.shape}")
 
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        # print(f"action_logstd.shape: {action_logstd.shape}")
-
-        action_std = torch.exp(action_logstd)
-        # print(f"action_std.shape: {action_std.shape}")
-
-        probs = Normal(action_mean, action_std)
+        probs = self.actor(actor_input)
         if action is None:
-            action = probs.sample().squeeze()
+            action = probs.sample()
+            action = action.squeeze()
         
         action_log_prob = probs.log_prob(action).sum(1)
-        # print(f"action_log_prob.shape: {action_log_prob.shape}")
-
         entropy = probs.entropy().sum(1)
-        # print(f"entropy.shape: {entropy.shape}")
-        
+
         critic_input = self.critic.preprocess_input(obs, train_mode=False)
         q_value = self.critic(critic_input).squeeze()
         
@@ -305,6 +239,7 @@ class LiberoAgent(nn.Module):
 #         self.task_emb = torch.randn(768)
 #         self.critic = make_policy('./critic_config.json')
 #         self.actor = make_policy('./actor_config.json')
+#         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
 
 #     def get_value(self, obs):
 #         obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
@@ -317,68 +252,31 @@ class LiberoAgent(nn.Module):
 #         obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
 
 #         actor_input = self.actor.preprocess_input(obs, train_mode=False)
-#         action_dist = self.actor(actor_input)
+#         action_mean = self.actor(actor_input).squeeze()
+#         # print(f"action_mean.shape: {action_mean.shape}")
+
+#         if action_mean.ndim == 1:
+#             action_mean = action_mean.unsqueeze(0)
+#         action_logstd = self.actor_logstd.expand_as(action_mean)
+#         # print(f"action_logstd.shape: {action_logstd.shape}")
+
+#         action_std = torch.exp(action_logstd)
+#         # print(f"action_std.shape: {action_std.shape}")
+
+#         probs = Normal(action_mean, action_std)
 #         if action is None:
-#             action = action_dist.sample().squeeze()
+#             action = probs.sample().squeeze()
         
-#         action_log_prob = action_dist.log_prob(action).sum(1)
+#         action_log_prob = probs.log_prob(action).sum(1)
+#         # print(f"action_log_prob.shape: {action_log_prob.shape}")
+
+#         entropy = probs.entropy().sum(1)
+#         # print(f"entropy.shape: {entropy.shape}")
         
 #         critic_input = self.critic.preprocess_input(obs, train_mode=False)
 #         q_value = self.critic(critic_input).squeeze()
-
-#         # action_dist_entropy = torch.zeros(len(obs))
-#         # action_dist_entropy = compute_mixture_entropy(action_dist)
-#         # print(f"action_dist_entropy: {action_dist_entropy.shape}")
-#         # print(action_dist_entropy)
-
-#         # return action, action_log_prob, action_dist_entropy, q_value
-#         return action, action_log_prob, 0, q_value
-
-
-# def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-#     torch.nn.init.orthogonal_(layer.weight, std)
-#     torch.nn.init.constant_(layer.bias, bias_const)
-#     return layer
-
-# class Agent(nn.Module):
-#     def __init__(self, envs):
-#         super().__init__()
-#         self.critic = nn.Sequential(
-#             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, 1), std=1.0),
-#         )
-#         self.actor_mean = nn.Sequential(
-#             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
-#         )
-#         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
-
-#     def get_value(self, x):
-#         return self.critic(x)
-
-#     def get_action_and_value(self, x, action=None):
-#         action_mean = self.actor_mean(x)
-#         action_logstd = self.actor_logstd.expand_as(action_mean)
-#         action_std = torch.exp(action_logstd)
-#         probs = Normal(action_mean, action_std)
-#         if action is None:
-#             action = probs.sample()
         
-#         print(f"log prob: {probs.log_prob(action).shape}")
-#         print(f"log prob: {probs.log_prob(action).sum(1).shape}")
-#         print(f"log prob: {probs.log_prob(action).sum(1)}")
-
-#         print(f"entropy: {probs.entropy().shape}")
-#         print(f"entropy: {probs.entropy().sum(1).shape}")
-#         print(f"entropy: {probs.entropy().sum(1)}")
-        
-#         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+#         return action, action_log_prob, entropy, q_value
 
 
 if __name__ == "__main__":
@@ -476,6 +374,7 @@ if __name__ == "__main__":
                 # print("*******LiberoAgent")
                 action, logprob, _, value = libero_agent.get_action_and_value(next_obs)
                 values[step] = value.flatten()
+
             actions[step] = action
             logprobs[step] = logprob
 
@@ -550,12 +449,7 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                # print("**************")
-                # print(f"mb_inds: {mb_inds}")
-                # print(b_obs.__class__)
-                # print(len(b_obs))
-
-                _, newlogprob, _, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                _, newlogprob, entropy, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 # _, newlogprob, entropy, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
@@ -590,10 +484,12 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-                # entropy_loss = entropy.mean()
-                # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                entropy_loss = entropy.mean()
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
-                loss = pg_loss + v_loss * args.vf_coef
+                # print(f"pg_loss: {pg_loss}")
+                # print(f"v_loss: {v_loss}")
+                # loss = pg_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
                 loss.backward()
