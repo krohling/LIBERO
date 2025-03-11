@@ -37,7 +37,16 @@ from libero.lifelong.utils import (
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
 def main(hydra_cfg):
     # preprocessing
-    print(f"hydra_cfg: {hydra_cfg}")
+
+    # check for USE_DET_HEAD environment variable
+
+    print(f"os.environ[\"USE_DET_HEAD\"] = {os.environ.get('USE_DET_HEAD')}")
+
+    if "USE_DET_HEAD" in os.environ and os.environ["USE_DET_HEAD"].lower() == "true":
+        with open('./actor_config.json', "r") as f:
+            hydra_cfg['policy'] = json.load(f)['policy']
+        print("Using DeterministicHead")
+
     yaml_config = OmegaConf.to_yaml(hydra_cfg)
     cfg = EasyDict(yaml.safe_load(yaml_config))
 

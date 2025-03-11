@@ -5,7 +5,7 @@ python benchmark_scripts/download_libero_datasets.py --datasets libero_object
 
 export MUJOCO_GL=egl
 echo "Training with Configuration: seed=0 benchmark_name=LIBERO_OBJECT policy=bc_transformer_policy lifelong=base"
-xvfb-run -a python libero/lifelong/main.py seed=0 benchmark_name=LIBERO_OBJECT policy=bc_transformer_policy lifelong=base
+xvfb-run -a python libero/lifelong/main.py seed=${SEED:-0} benchmark_name=${BENCHMARK_NAME:-LIBERO_OBJECT} policy=${POLICY:-bc_transformer_policy} lifelong=${LIFELONG:-base} train.n_epochs=${EPOCHS:-50} train.batch_size=${BATCH_SIZE:-128}
 
 # echo "Training with Configuration: seed=0 benchmark_name=LIBERO_OBJECT policy=bc_transformer_policy lifelong=er"
 # xvfb-run -a python libero/lifelong/main.py seed=0 benchmark_name=LIBERO_OBJECT policy=bc_transformer_policy lifelong=er
@@ -28,8 +28,8 @@ xvfb-run -a python libero/lifelong/main.py seed=0 benchmark_name=LIBERO_OBJECT p
 #                                    --load_task 9 \
 #                                    --device_id 0 --save-videos
 
-# echo "***Training Complete***"
-# if [ -n "$RUNPOD_POD_ID" ]; then
-#     echo "Terminating Pod"
-#     runpodctl remove pod $RUNPOD_POD_ID
-# fi
+echo "***Training Complete***"
+if [ -n "$RUNPOD_POD_ID" ]; then
+    echo "Terminating Pod"
+    runpodctl remove pod $RUNPOD_POD_ID
+fi
