@@ -16,6 +16,7 @@ logs/
 libero.egg-info/
 .vscode/
 
+libero/datasets/
 notebooks/
 images/
 Dockerfile

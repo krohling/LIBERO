@@ -32,8 +32,13 @@ RUN conda init bash && \
 WORKDIR /opt/ml/libero
 COPY requirements.txt /opt/ml/libero/requirements.txt
 RUN pip install -r requirements.txt
+COPY ppo/requirements-ppo.txt /opt/ml/libero/ppo/requirements-ppo.txt
+RUN pip install -r ppo/requirements-ppo.txt
 RUN pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
 RUN pip install robosuite
+
+# COPY ppo/requirements-mujoco.txt /opt/ml/libero/ppo/requirements-mujoco.txt
+# RUN pip install -r ppo/requirements-mujoco.txt
 
 ENV HF_HOME /opt/ml/input/data/huggingface_cache
 ENV LIBERO_CONFIG_PATH /opt/ml/libero/config

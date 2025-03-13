@@ -56,9 +56,7 @@ def torch_save_model(model, model_path, cfg=None, previous_masks=None):
 
 
 def torch_load_model(model_path, map_location=None):
-    print("*"*50)
     model_dict = torch.load(model_path, map_location=map_location)
-    print(model_dict.keys())
     cfg = None
     if "cfg" in model_dict:
         cfg = model_dict["cfg"]
