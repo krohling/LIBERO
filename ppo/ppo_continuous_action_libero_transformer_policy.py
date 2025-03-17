@@ -236,7 +236,8 @@ if __name__ == "__main__":
             video_writer.save()
             video_filename = f"{video_dir}/video.mp4"
             print(f"Saved video to {video_filename}")
-            wandb.save(video_filename)
+            if args.track:
+                wandb.save(video_filename)
 
         
         success_rate = next_done.sum() / args.num_envs
@@ -356,7 +357,8 @@ if __name__ == "__main__":
             model_path = f"runs/{run_name}/{args.policy}_{iteration}.pth"
             torch.save(libero_agent.state_dict(), model_path)
             print(f"model saved to {model_path}")
-            wandb.save(model_path)
+            if args.track:
+                wandb.save(model_path)
 
     #     from cleanrl_utils.evals.ppo_eval import evaluate
 
