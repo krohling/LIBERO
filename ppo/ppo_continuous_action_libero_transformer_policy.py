@@ -160,21 +160,14 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    # next_obs, _ = envs.reset(seed=args.seed)
-    envs.reset()
-    
-    dummy_action = [[0.]*7] * args.num_envs
-    next_obs, reward, done, info = envs.step(dummy_action)
-
-    # next_obs = obs_to_tensor(next_obs).to(device)
-    next_done = torch.zeros(args.num_envs).to(device)
 
     print(f"Running for {args.num_iterations} iterations")
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
         print(f"iteration: {iteration}")
         iteration_start = time.time()
-        envs.reset()
+        next_obs = envs.reset()
+        next_done = np.zeros(args.num_envs)
 
         video_dir = f"{args.video_folder}/{iteration}"
         video_writer = VideoWriter(video_dir, args.save_videos)
@@ -184,53 +177,38 @@ if __name__ == "__main__":
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
 
-        # next_obs_raw = next_obs
-        next_done = torch.zeros(args.num_envs).to(device)
+        success_count = 0
         for step in range(0, args.num_steps):
             print(f"step: {step}")
+
+            done_env_ids = np.nonzero(next_done)[0]
+            if len(done_env_ids) > 0:
+                success_count += len(done_env_ids)
+                print("*************************")
+                print(f"Resetting done envs: {done_env_ids}")
+                next_obs[done_env_ids] = envs.reset(done_env_ids)
+                next_done[done_env_ids] = torch.zeros(len(done_env_ids))
+                dones[step-1][done_env_ids] = torch.ones(len(done_env_ids))
+
             global_step += args.num_envs
             obs[step] = next_obs
-            dones[step] = next_done
+            dones[step] = torch.tensor(next_done).to(device).view(-1)
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                # if next_obs_raw:
-                #     policy_in = raw_obs_to_tensor_obs(next_obs, torch.randn(768), MODALITY_CONFIG)
-                #     policy_out = policy.get_action(policy_in)
-                #     print(f"policy_out: {policy_out.shape}")
-                #     print(policy_out)
-
-                # print("*******Agent")
-                # action, logprob, _, value = agent.get_action_and_value(obs_to_tensor(next_obs).to(device))
-                # print("*******LiberoAgent")
                 action, logprob, _, value = libero_agent.get_action_and_value(next_obs)
                 values[step] = value.flatten()
+                actions[step] = action
+                logprobs[step] = logprob
 
-            actions[step] = action
-            logprobs[step] = logprob
-
-            prev_done = next_done
             next_obs, reward, next_done, infos = envs.step(action.cpu().numpy())
+            rewards[step] = torch.tensor(reward).to(device).view(-1)
 
             video_writer.append_vector_obs(
                 next_obs, next_done, camera_name="agentview_image"
             )
-            rewards[step] = torch.tensor(reward).to(device).view(-1)
+            
 
-
-            next_done = torch.Tensor(next_done).to(device)
-            print(next_done)
-            print(infos)
-            new_next_done = torch.logical_or(next_done.bool(), prev_done.bool()).float()
-            if not torch.allclose(next_done, new_next_done, atol=1e-6):
-                print("new_next_done does not match next_done")
-                print(f"next_done: {next_done}")
-                print(f"new_next_done: {new_next_done}")
-            next_done = new_next_done
-
-            # all is done then break
-            # if next_done.sum() == args.num_envs:
-            #     break
         
         if args.save_videos:
             video_writer.save()
@@ -240,14 +218,16 @@ if __name__ == "__main__":
                 wandb.save(video_filename)
 
         
-        success_rate = next_done.sum() / args.num_envs
+        # success_rate = next_done.sum() / args.num_envs
         cum_rewards = rewards.sum(dim=0)
         max_cum_reward = cum_rewards.max()
         avg_cum_reward = cum_rewards.mean()
-        print(f"success_rate: {success_rate}")
+        # print(f"success_rate: {success_rate}")
+        print(f"success_count: {success_count}")
         print(f"max_reward: {max_cum_reward}")
         print(f"avg_reward: {avg_cum_reward}")
-        writer.add_scalar("charts/episodic_success_rate", success_rate, global_step)
+        # writer.add_scalar("charts/episodic_success_rate", success_rate, global_step)
+        writer.add_scalar("charts/episodic_success_count", success_count, global_step)
         writer.add_scalar("charts/episodic_max_return", max_cum_reward, global_step)
         writer.add_scalar("charts/episodic_avg_return", avg_cum_reward, global_step)
         
