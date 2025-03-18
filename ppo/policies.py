@@ -9,7 +9,7 @@ from torch.distributions.normal import Normal
 
 from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
-from libero.libero.envs.venv import SubprocVectorEnv
+from libero.libero.envs.venv import DummyVectorEnv
 from libero.lifelong.metric import raw_obs_to_tensor_obs
 from libero.lifelong.utils import torch_load_model, get_task_embs
 from libero.lifelong.models.bc_transformer_policy import BCTransformerPolicy
@@ -107,7 +107,7 @@ def make_libero_envs(
         "horizon": horizon
     }
 
-    env = SubprocVectorEnv(
+    env = DummyVectorEnv(
         [lambda: OffScreenRenderEnv(**env_args) for _ in range(num_envs)]
     )
     env.reset()
@@ -172,7 +172,7 @@ class StochHeadLiberoAgent(nn.Module):
         self.task_emb = envs.task_emb
         self.critic = make_policy('./policies/critic_config.json')
         self.actor = make_policy('./policies/actor_stoch_head_config.json')
-        self.actor.load_state_dict(torch_load_model('./checkpoints/actor_stoch_head_250.pth', 'cpu')[0])
+        self.actor.load_state_dict(torch_load_model('./checkpoints/actor_stoch_head_35.pth', 'cpu')[0])
 
     def get_value(self, obs):
         obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)

@@ -2,27 +2,25 @@
 
 if [[ "$TRAIN" == "RL" ]]; then
     echo "***RL Training***"
-    apt-get update && apt-get install -y \
-        libgles2-mesa-dev \
-        libgl1-mesa-dev \
-        libglu-dev \
-        libglew-dev \
-        mesa-utils
+    # apt-get update && apt-get install -y \
+    #     libgles2-mesa-dev \
+    #     libgl1-mesa-dev \
+    #     libglu-dev \
+    #     libglew-dev \
+    #     mesa-utils
 
-    apt-get install -y libosmesa6-dev patchelf
-    pip install --no-cache-dir --force-reinstall mujoco
-    export MUJOCO_GL=osmesa
-
+    # apt-get install -y libosmesa6-dev patchelf
+    # pip install --no-cache-dir --force-reinstall mujoco
     echo "Retrieving dataset: libero_object"
     python benchmark_scripts/download_libero_datasets.py --datasets libero_object 
 
-    echo "RL Training with Configuration: seed=${SEED:-1}, num_envs=${NUM_ENVS:-5}, num_steps=${NUM_STEPS:-600}, total_timesteps=${TOTAL_TIMESTEPS:-1000000}, policy=${POLICY:-StochHeadLiberoAgent}, wandb_project_name=${WANDB_PROJECT:-libero_rl}, wandb_entity=${WANDB_ENTITY:-kevin_ai}"
+    echo "RL Training with Configuration: seed=${SEED:-1}, num_envs=${NUM_ENVS:-5}, num_steps=${NUM_STEPS:-600}, learning_rate=${LR:-0.00001}, total_timesteps=${TOTAL_TIMESTEPS:-1000000}, policy=${POLICY:-StochHeadLiberoAgent}, wandb_project_name=${WANDB_PROJECT:-libero_rl}, wandb_entity=${WANDB_ENTITY:-kevin_ai}"
     cd ppo
-    python ppo_continuous_action_libero_transformer_policy.py --seed ${SEED:-1} --num_envs ${NUM_ENVS:-5} --num_steps ${NUM_STEPS:-600} --total_timesteps ${TOTAL_TIMESTEPS:-1000000} --policy ${POLICY:-StochHeadLiberoAgent} --wandb_project_name ${WANDB_PROJECT:-libero_rl} --wandb_entity ${WANDB_ENTITY:-kevin_ai} --save_videos --save_model --upload_model 
+    python ppo_continuous_action_libero_transformer_policy.py --seed ${SEED:-1} --num_envs ${NUM_ENVS:-5} --num_steps ${NUM_STEPS:-600} --learning_rate ${LR:-0.00001} --total_timesteps ${TOTAL_TIMESTEPS:-1000000} --policy ${POLICY:-StochHeadLiberoAgent} --wandb_project_name ${WANDB_PROJECT:-libero_rl} --wandb_entity ${WANDB_ENTITY:-kevin_ai} --track --save_videos --save_model --upload_model 
 
     echo "***RL Training Complete***"
 else
-    export MUJOCO_GL=egl
+    # export MUJOCO_GL=egl
     echo "***Training LIBERO***"
 
     echo "Retrieving dataset: libero_object"
