@@ -81,6 +81,8 @@ class Args:
     """the LIBERO task suite"""
     libero_task_id: int = 0
     """the LIBERO task id"""
+    reset_envs: str = "True"
+    """whether to reset the environments when an episode is done"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -101,6 +103,7 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
+    reset_envs = args.reset_envs.lower() == "true"
     run_name = f"{args.libero_task_suite}_{args.libero_task_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -131,6 +134,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = make_libero_envs(args.num_envs, args.libero_task_suite, args.libero_task_id, args.num_steps)
+    envs.seed(args.seed)
 
     if args.policy == 'StochHeadLiberoAgent':
         print("Using StochHeadLiberoAgent")
@@ -182,7 +186,7 @@ if __name__ == "__main__":
             print(f"step: {step}")
 
             done_env_ids = np.nonzero(next_done)[0]
-            if len(done_env_ids) > 0:
+            if len(done_env_ids) > 0 and reset_envs:
                 success_count += len(done_env_ids)
                 print("*************************")
                 print(f"Resetting done envs: {done_env_ids}")
@@ -207,7 +211,6 @@ if __name__ == "__main__":
             video_writer.append_vector_obs(
                 next_obs, next_done, camera_name="agentview_image"
             )
-            
 
         
         if args.save_videos:
@@ -218,16 +221,22 @@ if __name__ == "__main__":
                 wandb.save(video_filename)
 
         
-        # success_rate = next_done.sum() / args.num_envs
+        
+        if reset_envs:
+            print(f"success_count: {success_count}")
+            writer.add_scalar("charts/episodic_success_count", success_count, global_step)
+        else:
+            success_rate = next_done.sum() / args.num_envs
+            print(f"success_rate: {success_rate}")
+            writer.add_scalar("charts/episodic_success_rate", success_rate, global_step)
+
+        
         cum_rewards = rewards.sum(dim=0)
         max_cum_reward = cum_rewards.max()
         avg_cum_reward = cum_rewards.mean()
-        # print(f"success_rate: {success_rate}")
-        print(f"success_count: {success_count}")
         print(f"max_reward: {max_cum_reward}")
         print(f"avg_reward: {avg_cum_reward}")
-        # writer.add_scalar("charts/episodic_success_rate", success_rate, global_step)
-        writer.add_scalar("charts/episodic_success_count", success_count, global_step)
+        
         writer.add_scalar("charts/episodic_max_return", max_cum_reward, global_step)
         writer.add_scalar("charts/episodic_avg_return", avg_cum_reward, global_step)
         
@@ -304,10 +313,6 @@ if __name__ == "__main__":
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
-
-                # print(f"pg_loss: {pg_loss}")
-                # print(f"v_loss: {v_loss}")
-                # loss = pg_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
                 loss.backward()

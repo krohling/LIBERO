@@ -110,8 +110,6 @@ def make_libero_envs(
     env = DummyVectorEnv(
         [lambda: OffScreenRenderEnv(**env_args) for _ in range(num_envs)]
     )
-    env.reset()
-    env.seed(0)
 
     init_states_path = os.path.join(get_libero_path("init_states"), task.problem_folder, task.init_states_file)
     init_states = torch.load(init_states_path)
