@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass
 from easydict import EasyDict
 
-import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -19,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
-from libero.libero.envs.venv import SubprocVectorEnv
+from libero.libero.envs.venv import SubprocVectorEnv, DummyVectorEnv
 from libero.lifelong.metric import raw_obs_to_tensor_obs
 from libero.libero.utils.video_utils import VideoWriter
 from libero.lifelong.models.bc_transformer_policy import BCTransformerPolicy
@@ -173,7 +172,7 @@ def make_libero_envs(
         "horizon": horizon
     }
 
-    env = SubprocVectorEnv(
+    env = DummyVectorEnv(
         [lambda: OffScreenRenderEnv(**env_args) for _ in range(num_envs)]
     )
     env.reset()
