@@ -204,9 +204,9 @@ class ObjectState(BaseObjectState):
         # We say "pushed" if in contact AND we moved more than threshold
         result = (displacement > movement_thresh)
 
-        if result:
-            print(result)
-            print("knocked over")
+        # if result:
+        #     print(result)
+        #     print("knocked over")
 
         return result
 
