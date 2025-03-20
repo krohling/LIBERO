@@ -116,6 +116,8 @@ class Args:
     """the LIBERO task suite"""
     libero_task_id: int = 0
     """the LIBERO task id"""
+    libero_agent: str = 'stochastic'
+    """the type of agent to use, either 'stochastic' or 'deterministic'"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -254,12 +256,45 @@ def compute_mixture_entropy(gmm):
 
 
 
-class LiberoAgent(nn.Module):
+class StochLiberoAgent(nn.Module):
     def __init__(self, envs):
         super().__init__()
         self.task_emb = torch.randn(768)
         self.critic = make_policy('./critic_config.json')
-        self.actor = make_policy('./actor_config_prev.json')
+        self.actor = make_policy('./actor_config_stoch.json')
+        # self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+
+    def get_value(self, obs):
+        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
+        critic_input = self.critic.preprocess_input(obs, train_mode=False)
+        q_value = self.critic(critic_input).squeeze()
+
+        return q_value
+
+    def get_action_and_value(self, obs, action=None):
+        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
+        actor_input = self.actor.preprocess_input(obs, train_mode=False)
+
+        probs = self.actor(actor_input)
+        if action is None:
+            action = probs.sample()
+            action = action.squeeze()
+        
+        action_log_prob = probs.log_prob(action).sum(1)
+        entropy = probs.entropy().sum(1)
+
+        critic_input = self.critic.preprocess_input(obs, train_mode=False)
+        q_value = self.critic(critic_input).squeeze()
+        
+        return action, action_log_prob, entropy, q_value
+
+
+class DetLiberoAgent(nn.Module):
+    def __init__(self, envs):
+        super().__init__()
+        self.task_emb = torch.randn(768)
+        self.critic = make_policy('./critic_config.json')
+        self.actor = make_policy('./actor_config_det.json')
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
 
     def get_value(self, obs):
@@ -297,88 +332,6 @@ class LiberoAgent(nn.Module):
         
         return action, action_log_prob, entropy, q_value
 
-
-
-# class LiberoAgent(nn.Module):
-#     def __init__(self, envs):
-#         super().__init__()
-#         self.task_emb = torch.randn(768)
-#         self.critic = make_policy('./critic_config.json')
-#         self.actor = make_policy('./actor_config.json')
-
-#     def get_value(self, obs):
-#         obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-#         critic_input = self.critic.preprocess_input(obs, train_mode=False)
-#         q_value = self.critic(critic_input).squeeze()
-
-#         return q_value
-
-#     def get_action_and_value(self, obs, action=None):
-#         obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-
-#         actor_input = self.actor.preprocess_input(obs, train_mode=False)
-#         action_dist = self.actor(actor_input)
-#         if action is None:
-#             action = action_dist.sample().squeeze()
-        
-#         action_log_prob = action_dist.log_prob(action).sum(1)
-        
-#         critic_input = self.critic.preprocess_input(obs, train_mode=False)
-#         q_value = self.critic(critic_input).squeeze()
-
-#         # action_dist_entropy = torch.zeros(len(obs))
-#         # action_dist_entropy = compute_mixture_entropy(action_dist)
-#         # print(f"action_dist_entropy: {action_dist_entropy.shape}")
-#         # print(action_dist_entropy)
-
-#         # return action, action_log_prob, action_dist_entropy, q_value
-#         return action, action_log_prob, 0, q_value
-
-
-# def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-#     torch.nn.init.orthogonal_(layer.weight, std)
-#     torch.nn.init.constant_(layer.bias, bias_const)
-#     return layer
-
-# class Agent(nn.Module):
-#     def __init__(self, envs):
-#         super().__init__()
-#         self.critic = nn.Sequential(
-#             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, 1), std=1.0),
-#         )
-#         self.actor_mean = nn.Sequential(
-#             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, 64)),
-#             nn.Tanh(),
-#             layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
-#         )
-#         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
-
-#     def get_value(self, x):
-#         return self.critic(x)
-
-#     def get_action_and_value(self, x, action=None):
-#         action_mean = self.actor_mean(x)
-#         action_logstd = self.actor_logstd.expand_as(action_mean)
-#         action_std = torch.exp(action_logstd)
-#         probs = Normal(action_mean, action_std)
-#         if action is None:
-#             action = probs.sample()
-        
-#         print(f"log prob: {probs.log_prob(action).shape}")
-#         print(f"log prob: {probs.log_prob(action).sum(1).shape}")
-#         print(f"log prob: {probs.log_prob(action).sum(1)}")
-
-#         print(f"entropy: {probs.entropy().shape}")
-#         print(f"entropy: {probs.entropy().sum(1).shape}")
-#         print(f"entropy: {probs.entropy().sum(1)}")
-        
-#         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
 if __name__ == "__main__":
@@ -419,7 +372,13 @@ if __name__ == "__main__":
     # env setup
     envs = make_libero_envs(args.num_envs, args.libero_task_suite, args.libero_task_id, args.num_steps)
     # agent = Agent(envs).to(device)
-    libero_agent = LiberoAgent(envs).to(device)
+    if args.libero_agent == 'deterministic':
+        print("Using deterministic agent")
+        libero_agent = DetLiberoAgent(envs).to(device)
+    else:
+        print("Using stochastic agent")
+        libero_agent = StochLiberoAgent(envs).to(device)
+    
     optimizer = optim.Adam(libero_agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -555,8 +514,8 @@ if __name__ == "__main__":
                 # print(b_obs.__class__)
                 # print(len(b_obs))
 
-                _, newlogprob, _, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
-                # _, newlogprob, entropy, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                # _, newlogprob, _, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                _, newlogprob, entropy, newvalue = libero_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -590,10 +549,8 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-                # entropy_loss = entropy.mean()
-                # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
-
-                loss = pg_loss + v_loss * args.vf_coef
+                entropy_loss = entropy.mean()
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
                 loss.backward()
