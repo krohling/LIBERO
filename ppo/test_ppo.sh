@@ -1,0 +1,1 @@
+python ppo_continuous_action_libero_transformer_policy.py --checkpoint_path ./checkpoints/task0_model_epoch_45.pth --num_envs 5 --num_steps 600 --learning_rate 0.00001

@@ -80,6 +80,9 @@ class Up(BinaryAtomic):
     def __call__(self, arg1):
         return arg1.get_geom_state()["pos"][2] >= 1.0
 
+class KnockedOver(BinaryAtomic):
+    def __call__(self, arg1):
+        return arg1.is_knocked_over()
 
 class Stack(BinaryAtomic):
     def __call__(self, arg1, arg2):

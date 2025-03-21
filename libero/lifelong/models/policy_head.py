@@ -62,7 +62,7 @@ class StochasticHead(nn.Module):
     def __init__(self, input_size, output_size, hidden_size=1024, num_layers=2, action_squash=False):
 
         super().__init__()
-        sizes = [input_size] + [hidden_size] * num_layers + [output_size]
+        sizes = [input_size] + [hidden_size] * num_layers + [2*output_size]
         layers = []
         for i in range(num_layers):
             layers += [nn.Linear(sizes[i], sizes[i + 1]), nn.ReLU()]
@@ -72,21 +72,20 @@ class StochasticHead(nn.Module):
             layers += [nn.Tanh()]
 
         self.net = nn.Sequential(*layers)
-        self.action_logstd = nn.Parameter(torch.zeros(1, np.prod(output_size)))
+        # self.action_logstd = nn.Parameter(torch.zeros(1, np.prod(output_size)))
 
     def forward(self, x):
-        action_mean = self.net(x)
+        out = self.net(x)
 
-        if action_mean.ndim == 3 and action_mean.shape[1] == 1:
-            action_mean = action_mean.squeeze(1)
+        mean, log_std = out.chunk(2, dim=-1)
 
-        action_logstd = self.action_logstd.expand_as(action_mean)
-        # action_logstd = self.action_logstd.repeat(x.shape[0], 1) # uncomment to match batch size
+        if mean.ndim == 3 and mean.shape[1] == 1:
+            mean = mean.squeeze(1)
+            log_std = log_std.squeeze(1)
 
-        action_std = torch.exp(action_logstd)
-        probs = D.Normal(action_mean, action_std)
-
-        return probs
+        std = torch.exp(log_std)
+        dist = D.Normal(mean, std)
+        return dist
 
     def loss_fn(self, y_dist, target, reduction="mean"):
         log_probs = y_dist.log_prob(target)
@@ -99,18 +98,6 @@ class StochasticHead(nn.Module):
             return loss.sum()
         else:
             raise NotImplementedError
-    
-    # def loss_fn(self, y_dist, target, reduction="mean"):
-    #     log_probs = y_dist.log_prob(target)
-    #     if log_probs.ndim > 1:
-    #         log_probs = log_probs.sum(dim=-1)
-    #     loss = -log_probs
-    #     if reduction == "mean":
-    #         return loss.mean()
-    #     elif reduction == "sum":
-    #         return loss.sum()
-    #     else:
-    #         return loss
 
 
 class GMMHead(nn.Module):

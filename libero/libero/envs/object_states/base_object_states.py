@@ -43,6 +43,8 @@ class ObjectState(BaseObjectState):
         self.has_turnon_affordance = hasattr(
             self.env.get_object(self.object_name), "turn_on"
         )
+        self.prev_pos = None
+        self.step_count = 0
 
     def get_geom_state(self):
         object_pos = self.env.sim.data.body_xpos[self.env.obj_body_id[self.object_name]]
@@ -129,9 +131,28 @@ class ObjectState(BaseObjectState):
                 return False
         return True
 
+    def is_knocked_over(self, movement_thresh=0.0001):
+        if self.step_count < 20:
+            self.step_count += 1
+            return False
+
+        current_pos = self.get_geom_state()["pos"]
+
+        if self.prev_pos is None:
+            self.prev_pos = np.array(current_pos)
+            return False
+
+        displacement = np.linalg.norm(current_pos - self.prev_pos)
+        result = (displacement > movement_thresh)
+
+        return result
+
     def update_state(self):
         if self.has_turnon_affordance:
             self.turn_on()
+        
+        if self.prev_pos is None:
+            self.prev_pos = np.array(self.get_geom_state()["pos"])
 
 
 class SiteObjectState(BaseObjectState):
