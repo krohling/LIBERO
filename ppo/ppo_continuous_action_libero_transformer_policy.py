@@ -98,10 +98,14 @@ class Args:
     learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
-    """the number of parallel game environments"""
+    """the number of parallel environments for trajectory collection"""
+    num_eval_envs: int = 5
+    """the number of parallel environments for evaluation"""
+    eval_frequency: int = 1
+    """the number of iterations to run evaluation"""
     num_steps: int = 600
     """the number of steps to run in each environment per policy rollout"""
-    anneal_lr: bool = True
+    anneal_lr: bool = False
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -130,8 +134,6 @@ class Args:
     """the LIBERO task suite"""
     libero_task_id: int = 0
     """the LIBERO task id"""
-    libero_agent: str = 'stochastic'
-    """the type of agent to use, either 'stochastic' or 'deterministic'"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -141,7 +143,14 @@ class Args:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
-    checkpoint_path: str = ""
+    checkpoint_path: str = None
+    """the checkpoint to use for the actor network"""
+    pretrain_value_iters: int = 0
+    """the number of pretraining iterations for the value network"""
+    reset_envs: bool = False
+    """whether to reset the 'done' environments during trajectory collection"""
+    critic_type: str = 'transformer'
+    """the type of critic to use"""
 
 
 def obs_to_tensor(obs_tensor_dict):
@@ -209,7 +218,6 @@ def make_libero_envs(
         obs, _, _, _ = env.step(dummy_action)
         obs_tensor = obs_to_tensor(obs)
 
-    # Flatten the shape for the FCN
     observation_space_dim = np.prod(obs_tensor[0].shape)
     env.task_emb = task_emb
     env.single_observation_space = torch.zeros(observation_space_dim)
@@ -218,27 +226,50 @@ def make_libero_envs(
     return env
 
 
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
 
 class StochLiberoAgent(nn.Module):
-    def __init__(self, envs, checkpoint_path):
+    def __init__(self, envs, checkpoint_path=None, critic_type='transformer'):
         super().__init__()
         self.task_emb = envs.task_emb
-        self.critic = make_policy('./critic_config.json')
+        self.critic_type = critic_type
+
+        if critic_type == 'mlp':
+            self.critic = nn.Sequential(
+                layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 1), std=1.0),
+            )
+        else:
+            self.critic = make_policy('./critic_config.json')
+
         self.actor = make_policy('./actor_stoch_config.json')
-        print(f"Loading checkpoint: {checkpoint_path}")
-        self.actor.load_state_dict(torch_load_model(checkpoint_path, 'cpu')[0])
+        if checkpoint_path:
+            print(f"Loading checkpoint: {checkpoint_path}")
+            self.actor.load_state_dict(torch_load_model(checkpoint_path, 'cpu')[0])
 
     def get_value(self, obs):
-        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-        critic_input = self.critic.preprocess_input(obs, train_mode=False)
-        q_value = self.critic(critic_input).squeeze()
+        if self.critic_type == 'mlp':
+            obs_tensor = obs_to_tensor(obs)
+            q_value = self.critic(obs_tensor).squeeze()
+        else:
+            obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
+            critic_input = self.critic.preprocess_input(obs, train_mode=False)
+            q_value = self.critic(critic_input).squeeze()
 
+        print('get_value')
+        print(f"q_value: {q_value}")
         return q_value
 
     def get_action_and_value(self, obs, action=None):
-        obs = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
-        actor_input = self.actor.preprocess_input(obs, train_mode=False)
+        obs_dict = raw_obs_to_tensor_obs(obs, self.task_emb, MODALITY_CONFIG)
 
+        actor_input = self.actor.preprocess_input(obs_dict, train_mode=False)
         probs = self.actor(actor_input)
         if action is None:
             action = probs.sample()
@@ -247,10 +278,86 @@ class StochLiberoAgent(nn.Module):
         action_log_prob = probs.log_prob(action).sum(1)
         entropy = probs.entropy().sum(1)
 
-        critic_input = self.critic.preprocess_input(obs, train_mode=False)
-        q_value = self.critic(critic_input).squeeze()
+        if self.critic_type == 'mlp':
+            obs_tensor = obs_to_tensor(obs)
+            q_value = self.critic(obs_tensor).squeeze()
+        else:
+            critic_input = self.critic.preprocess_input(obs_dict, train_mode=False)
+            q_value = self.critic(critic_input).squeeze()
         
+        print('get_action_and_value')
+        print(f"q_value: {q_value}")
         return action, action_log_prob, entropy, q_value
+
+
+def perform_evaluation(libero_agent, global_step, args):
+    envs = make_libero_envs(args.num_eval_envs, args.libero_task_suite, args.libero_task_id, args.num_steps)
+    next_obs = envs.reset()
+
+    rewards = torch.zeros((args.num_steps, args.num_eval_envs)).to(device)
+    dones = torch.zeros((args.num_steps, args.num_eval_envs)).to(device)
+    values = torch.zeros((args.num_steps, args.num_eval_envs)).to(device)
+
+    video_writer = VideoWriter(args.video_folder, args.save_videos)
+    next_done = torch.zeros(args.num_eval_envs).to(device)
+
+    for step in range(0, args.num_steps):
+        print(f"step: {step}")
+        dones[step] = next_done
+
+        # ALGO LOGIC: action logic
+        with torch.no_grad():
+            action, _, _, value = libero_agent.get_action_and_value(next_obs)
+            values[step] = value.flatten()
+
+        next_obs, reward, next_done, _ = envs.step(action.cpu().numpy())
+
+        video_writer.append_vector_obs(
+            next_obs, next_done, camera_name="agentview_image"
+        )
+        rewards[step] = torch.tensor(reward).to(device).view(-1)
+        next_done = torch.Tensor(next_done).to(device)
+
+        if next_done.sum() == args.num_envs:
+            break
+    
+    envs.close()
+    
+    video_writer.save()
+    if args.track:
+        wandb.save(f"{args.video_folder}/video.mp4")
+    
+    with torch.no_grad():
+        next_value = libero_agent.get_value(next_obs).reshape(1, -1)
+        advantages = torch.zeros_like(rewards).to(device)
+        lastgaelam = 0
+        for t in reversed(range(args.num_steps)):
+            if t == args.num_steps - 1:
+                nextnonterminal = 1.0 - next_done
+                nextvalues = next_value
+            else:
+                nextnonterminal = 1.0 - dones[t + 1]
+                nextvalues = values[t + 1]
+            delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+            advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+        returns = advantages + values
+    
+    success_rate = next_done.sum() / args.num_envs
+    cum_rewards = rewards.sum(dim=0)
+    max_cum_reward = cum_rewards.max()
+    avg_cum_reward = cum_rewards.mean()
+    avg_cum_returns = returns.sum(dim=0).mean()
+
+    writer.add_scalar("charts/validation_success_rate", success_rate, global_step)
+    writer.add_scalar("charts/validation_max_reward", max_cum_reward, global_step)
+    writer.add_scalar("charts/validation_avg_reward", avg_cum_reward, global_step)
+    writer.add_scalar("charts/validation_avg_return", avg_cum_returns, global_step)
+
+
+    print(f"success_rate: {success_rate}")
+    print(f"max_reward: {max_cum_reward}")
+    print(f"avg_reward: {avg_cum_reward}")
+    print(f"avg_return: {avg_cum_returns}")
 
 
 
@@ -291,7 +398,11 @@ if __name__ == "__main__":
 
     # env setup
     envs = make_libero_envs(args.num_envs, args.libero_task_suite, args.libero_task_id, args.num_steps)
-    libero_agent = StochLiberoAgent(envs, args.checkpoint_path).to(device)
+    libero_agent = StochLiberoAgent(
+        envs, 
+        checkpoint_path=args.checkpoint_path,
+        critic_type=args.critic_type
+    ).to(device)
     
     optimizer = optim.Adam(libero_agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -315,11 +426,20 @@ if __name__ == "__main__":
     next_done = torch.zeros(args.num_envs).to(device)
 
     print(f"Running for {args.num_iterations} iterations")
-    video_writer = VideoWriter(args.video_folder, args.save_videos)
+    
     for iteration in range(1, args.num_iterations + 1):
         print(f"iteration: {iteration}")
         iteration_start = time.time()
         envs.reset()
+
+        if iteration <= args.pretrain_value_iters:
+            print("Freezing actor parameters. Only training value network for this iteration.")
+            for param in libero_agent.actor.parameters():
+                param.requires_grad = False
+        else:
+            for param in libero_agent.actor.parameters():
+                param.requires_grad = True
+
         
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
@@ -329,6 +449,9 @@ if __name__ == "__main__":
 
         for step in range(0, args.num_steps):
             print(f"step: {step}")
+
+            done_env_ids = np.nonzero(next_done.cpu().numpy())[0]
+
             global_step += args.num_envs
             obs[step] = next_obs
             dones[step] = next_done
@@ -342,29 +465,17 @@ if __name__ == "__main__":
 
             next_obs, reward, next_done, infos = envs.step(action.cpu().numpy())
 
-            video_writer.append_vector_obs(
-                next_obs, next_done, camera_name="agentview_image"
-            )
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_done = torch.Tensor(next_done).to(device)
 
-        
-        video_writer.save()
-        if args.track:
-            wandb.save(f"{args.video_folder}/video.mp4")
+            if len(done_env_ids) > 0 and args.reset_envs:
+                print(f"Resetting done envs: {done_env_ids}")
+                next_obs[done_env_ids] = envs.reset(done_env_ids)
+                next_done[done_env_ids] = torch.zeros(len(done_env_ids)).to(device)
 
-        
-        success_rate = next_done.sum() / args.num_envs
-        cum_rewards = rewards.sum(dim=0)
-        max_cum_reward = cum_rewards.max()
-        avg_cum_reward = cum_rewards.mean()
-        print(f"success_rate: {success_rate}")
-        print(f"max_reward: {max_cum_reward}")
-        print(f"avg_reward: {avg_cum_reward}")
-        writer.add_scalar("charts/episodic_success_rate", success_rate, global_step)
-        writer.add_scalar("charts/episodic_max_return", max_cum_reward, global_step)
-        writer.add_scalar("charts/episodic_avg_return", avg_cum_reward, global_step)
-        
+        if iteration % args.eval_frequency == 0:
+            perform_evaluation(libero_agent, global_step, args)
+
         # bootstrap value if not done
         with torch.no_grad():
             next_value = libero_agent.get_value(next_obs).reshape(1, -1)

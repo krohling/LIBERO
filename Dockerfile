@@ -22,6 +22,8 @@ RUN apt-get update --allow-unauthenticated && apt-get install -y \
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx libegl1-mesa libgles2-mesa ffmpeg
 
+# $ sudo apt install -y libosmesa6-dev libgl1-mesa-glx libglfw3 patchelf
+
 
 # Setup conda environment
 RUN conda init bash && \
@@ -34,6 +36,7 @@ COPY requirements.txt /opt/ml/libero/requirements.txt
 RUN pip install -r requirements.txt
 RUN pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
 RUN pip install robosuite
+RUN pip install tyro
 
 ENV HF_HOME /opt/ml/input/data/huggingface_cache
 ENV LIBERO_CONFIG_PATH /opt/ml/libero/config
