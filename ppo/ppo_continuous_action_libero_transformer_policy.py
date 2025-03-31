@@ -129,6 +129,8 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
+    kl_loss_coef: float = 0.0
+    """the coefficient of the KL loss"""
 
     libero_task_suite: str = 'libero_object'
     """the LIBERO task suite"""
@@ -262,8 +264,6 @@ class StochLiberoAgent(nn.Module):
             critic_input = self.critic.preprocess_input(obs, train_mode=False)
             q_value = self.critic(critic_input).squeeze()
 
-        print('get_value')
-        print(f"q_value: {q_value}")
         return q_value
 
     def get_action_and_value(self, obs, action=None):
@@ -285,8 +285,6 @@ class StochLiberoAgent(nn.Module):
             critic_input = self.critic.preprocess_input(obs_dict, train_mode=False)
             q_value = self.critic(critic_input).squeeze()
         
-        print('get_action_and_value')
-        print(f"q_value: {q_value}")
         return action, action_log_prob, entropy, q_value
 
 
@@ -360,6 +358,10 @@ def perform_evaluation(libero_agent, global_step, args):
     print(f"avg_return: {avg_cum_returns}")
 
 
+def set_freeze_status(model, frozen=False):
+    for param in model.parameters():
+        param.requires_grad = not frozen
+
 
 if __name__ == "__main__":
     # policy = make_policy('./actor_config.json')
@@ -403,6 +405,13 @@ if __name__ == "__main__":
         checkpoint_path=args.checkpoint_path,
         critic_type=args.critic_type
     ).to(device)
+
+    frozen_agent = StochLiberoAgent(
+        envs, 
+        checkpoint_path=args.checkpoint_path,
+        critic_type=args.critic_type
+    ).to(device)
+    set_freeze_status(frozen_agent, frozen=True)
     
     optimizer = optim.Adam(libero_agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -434,11 +443,9 @@ if __name__ == "__main__":
 
         if iteration <= args.pretrain_value_iters:
             print("Freezing actor parameters. Only training value network for this iteration.")
-            for param in libero_agent.actor.parameters():
-                param.requires_grad = False
+            set_freeze_status(libero_agent.actor, frozen=True)
         else:
-            for param in libero_agent.actor.parameters():
-                param.requires_grad = True
+            set_freeze_status(libero_agent.actor, frozen=False)
 
         
         # Annealing the rate if instructed to do so.
@@ -544,8 +551,18 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
+                # KL - Divergence loss
+                _, bc_logprob, _, _ = frozen_agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                kl_loss = torch.nn.functional.kl_div(
+                    input=bc_logprob, 
+                    target=newlogprob,
+                    reduction='batchmean', 
+                    log_target=True
+                )
+                # kl_loss = (newlogprob - bc_logprob).mean()
+
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                loss = pg_loss - (args.ent_coef * entropy_loss) + (v_loss * args.vf_coef) + (kl_loss * args.kl_loss_coef)
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -573,32 +590,6 @@ if __name__ == "__main__":
 
         print(f"iteration {iteration} took {time.time() - iteration_start:.2f} seconds")
 
-    # Unused CleanRL code for saving model and evaluation
-    # if args.save_model:
-    #     model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
-    #     torch.save(agent.state_dict(), model_path)
-    #     print(f"model saved to {model_path}")
-    #     from cleanrl_utils.evals.ppo_eval import evaluate
-
-    #     episodic_returns = evaluate(
-    #         model_path,
-    #         make_env,
-    #         args.env_id,
-    #         eval_episodes=10,
-    #         run_name=f"{run_name}-eval",
-    #         Model=Agent,
-    #         device=device,
-    #         gamma=args.gamma,
-    #     )
-    #     for idx, episodic_return in enumerate(episodic_returns):
-    #         writer.add_scalar("eval/episodic_return", episodic_return, idx)
-
-    #     if args.upload_model:
-    #         from cleanrl_utils.huggingface import push_to_hub
-
-    #         repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-    #         repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-    #         push_to_hub(args, episodic_returns, repo_id, "PPO", f"runs/{run_name}", f"videos/{run_name}-eval")
 
     envs.close()
     writer.close()
